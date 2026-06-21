@@ -29,12 +29,14 @@
 
 ## 推荐第一轮：最接近真实场景，无额外压力
 
+默认进程名是 `codeArts-agent`。
+
 如果 Agent 输入框有快捷键，例如 `Ctrl+Shift+A`：
 
 ```powershell
 cd G:\crash
 .\scripts\repro-stable-runner.ps1 `
-  -ProcessName Code `
+  -ProcessName codeArts-agent `
   -WindowMode cover `
   -RestoreMode maximize `
   -Episodes 10 `
@@ -52,13 +54,14 @@ cd G:\crash
 
 ```powershell
 .\scripts\repro-stable-runner.ps1 `
-  -ProcessName Code `
+  -ProcessName codeArts-agent `
   -WindowMode cover `
   -RestoreMode maximize `
   -Episodes 10 `
   -AgentPromptDir .\agent-prompts `
   -AgentClickX 1450 `
   -AgentClickY 980 `
+  -MaximizeBeforeAgentInput `
   -PromptEachEpisode `
   -AgentRunSeconds 90 `
   -AgentCooldownSeconds 180 `
@@ -67,11 +70,19 @@ cd G:\crash
   -PostRestoreCheckIntervalSeconds 5
 ```
 
+如果会话聊一段时间后输入框失效，需要先点“打开会话/新会话”，再点输入框，使用：
+
+```powershell
+-AgentClickSequence "120,160;1450,980" -MaximizeBeforeAgentInput
+```
+
+坐标都是相对 IDE 主窗口左上角。详见 [Agent自动投喂说明.md](G:/crash/Agent自动投喂说明.md)。
+
 ## 第二轮：只加打开网页
 
 ```powershell
 .\scripts\repro-stable-runner.ps1 `
-  -ProcessName Code `
+  -ProcessName codeArts-agent `
   -WindowMode cover `
   -RestoreMode maximize `
   -Episodes 10 `
@@ -92,7 +103,7 @@ cd G:\crash
 
 ```powershell
 .\scripts\repro-stable-runner.ps1 `
-  -ProcessName Code `
+  -ProcessName codeArts-agent `
   -WindowMode cover `
   -RestoreMode maximize `
   -Episodes 10 `
@@ -113,7 +124,7 @@ cd G:\crash
 
 ```powershell
 .\scripts\repro-stable-runner.ps1 `
-  -ProcessName Code `
+  -ProcessName codeArts-agent `
   -WindowMode cover `
   -RestoreMode maximize `
   -Episodes 10 `

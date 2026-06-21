@@ -1,5 +1,5 @@
 param(
-  [string]$ProcessName = "Code",
+  [string]$ProcessName = "codeArts-agent",
   [ValidateSet("cover", "minimize")]
   [string]$WindowMode = "cover",
   [ValidateSet("maximize", "restore")]
@@ -13,9 +13,12 @@ param(
   [string]$AgentPromptFile = "",
   [string]$AgentPromptDir = "",
   [string]$AgentFocusKeys = "",
+  [string]$AgentClickSequence = "",
   [int]$AgentClickX = -1,
   [int]$AgentClickY = -1,
   [string]$AgentSubmitKeys = "{ENTER}",
+  [int]$AgentPasteRetries = 1,
+  [switch]$MaximizeBeforeAgentInput,
   [int]$AgentRunSeconds = 90,
   [int]$AgentCooldownSeconds = 120,
   [switch]$PromptEachEpisode,
@@ -116,10 +119,16 @@ function Invoke-AgentPrompt {
     "-File", (Join-Path $PSScriptRoot "send-agent-prompt.ps1"),
     "-ProcessName", $ProcessName,
     "-FocusKeys", $AgentFocusKeys,
+    "-ClickSequence", $AgentClickSequence,
     "-ClickX", $AgentClickX,
     "-ClickY", $AgentClickY,
-    "-SubmitKeys", $AgentSubmitKeys
+    "-SubmitKeys", $AgentSubmitKeys,
+    "-PasteRetries", $AgentPasteRetries
   )
+
+  if ($MaximizeBeforeAgentInput) {
+    $args += "-MaximizeBeforeInput"
+  }
 
   if ($PromptFileOverride) {
     $args += @("-PromptFile", $PromptFileOverride)
