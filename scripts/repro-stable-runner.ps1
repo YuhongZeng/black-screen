@@ -158,13 +158,22 @@ function Invoke-AgentPrompt {
     "-ExecutionPolicy", "Bypass",
     "-File", (Join-Path $PSScriptRoot "send-agent-prompt.ps1"),
     "-ProcessName", $ProcessName,
-    "-FocusKeys", $AgentFocusKeys,
-    "-ClickSequence", $clickSequenceForAttempt,
     "-ClickX", $clickXForAttempt,
     "-ClickY", $clickYForAttempt,
-    "-SubmitKeys", $AgentSubmitKeys,
     "-PasteRetries", $AgentPasteRetries
   )
+
+  if ($AgentFocusKeys) {
+    $args += @("-FocusKeys", $AgentFocusKeys)
+  }
+
+  if ($clickSequenceForAttempt) {
+    $args += @("-ClickSequence", $clickSequenceForAttempt)
+  }
+
+  if ($AgentSubmitKeys) {
+    $args += @("-SubmitKeys", $AgentSubmitKeys)
+  }
 
   if ($MaximizeBeforeAgentInput) {
     $args += "-MaximizeBeforeInput"
