@@ -16,6 +16,12 @@ param(
   [string]$AgentClickSequence = "",
   [int]$AgentClickX = -1,
   [int]$AgentClickY = -1,
+  [int]$AgentNewChatClickX = -1,
+  [int]$AgentNewChatClickY = -1,
+  [int]$AgentFirstInputClickX = -1,
+  [int]$AgentFirstInputClickY = -1,
+  [int]$AgentFollowupInputClickX = -1,
+  [int]$AgentFollowupInputClickY = -1,
   [string]$AgentSubmitKeys = "{ENTER}",
   [int]$AgentPasteRetries = 1,
   [switch]$MaximizeBeforeAgentInput,
@@ -62,11 +68,28 @@ if (-not (Test-Path -LiteralPath $LogDir)) {
 
 function Invoke-AgentPrompt {
   param(
-    [string]$PromptFileOverride = ""
+    [string]$PromptFileOverride = "",
+    [int]$Attempt = 1
   )
 
   if (-not $AgentPrompt -and -not $AgentPromptFile -and -not $PromptFileOverride) {
     return
+  }
+
+  $clickSequenceForAttempt = $AgentClickSequence
+  $clickXForAttempt = $AgentClickX
+  $clickYForAttempt = $AgentClickY
+
+  if ($AgentNewChatClickX -ge 0 -and $AgentNewChatClickY -ge 0) {
+    if ($Attempt -eq 1 -and $AgentFirstInputClickX -ge 0 -and $AgentFirstInputClickY -ge 0) {
+      $clickSequenceForAttempt = "$AgentNewChatClickX,$AgentNewChatClickY;$AgentFirstInputClickX,$AgentFirstInputClickY"
+      $clickXForAttempt = -1
+      $clickYForAttempt = -1
+    } elseif ($Attempt -gt 1 -and $AgentFollowupInputClickX -ge 0 -and $AgentFollowupInputClickY -ge 0) {
+      $clickSequenceForAttempt = "$AgentNewChatClickX,$AgentNewChatClickY;$AgentFollowupInputClickX,$AgentFollowupInputClickY"
+      $clickXForAttempt = -1
+      $clickYForAttempt = -1
+    }
   }
 
   $args = @(
@@ -75,9 +98,9 @@ function Invoke-AgentPrompt {
     "-File", (Join-Path $PSScriptRoot "send-agent-prompt.ps1"),
     "-ProcessName", $ProcessName,
     "-FocusKeys", $AgentFocusKeys,
-    "-ClickSequence", $AgentClickSequence,
-    "-ClickX", $AgentClickX,
-    "-ClickY", $AgentClickY,
+    "-ClickSequence", $clickSequenceForAttempt,
+    "-ClickX", $clickXForAttempt,
+    "-ClickY", $clickYForAttempt,
     "-SubmitKeys", $AgentSubmitKeys,
     "-PasteRetries", $AgentPasteRetries
   )
@@ -123,7 +146,7 @@ function Start-LocalStressPage {
 
 if ($AgentPrompt -or $AgentPromptFile -or $AgentPromptDir) {
   Write-Host "Sending initial agent prompt"
-  Invoke-AgentPrompt -PromptFileOverride (Get-PromptFileForLoop -Index 1)
+    Invoke-AgentPrompt -PromptFileOverride (Get-PromptFileForLoop -Index 1) -Attempt 1
 }
 
 Write-Host "Warmup for $WarmupSeconds seconds. Start the real agent/plugin workload now if needed."
@@ -140,7 +163,7 @@ for ($i = 1; $i -le $Loops; $i++) {
 
   if ($PromptBeforeEachLoop) {
     Write-Host "Sending per-loop agent prompt"
-    Invoke-AgentPrompt -PromptFileOverride (Get-PromptFileForLoop -Index $i)
+    Invoke-AgentPrompt -PromptFileOverride (Get-PromptFileForLoop -Index $i) -Attempt 1
     Write-Host "Agent active phase: $AgentRunSeconds seconds"
     Start-Sleep -Seconds $AgentRunSeconds
   }
