@@ -31,6 +31,13 @@ param(
   [int]$AgentVisualQuietSeconds = 20,
   [int]$AgentVisualIntervalSeconds = 2,
   [double]$AgentVisualChangeThreshold = 0.002,
+  [switch]$CheckAgentError,
+  [int]$AgentErrorStartX = 0,
+  [int]$AgentErrorStartY = 0,
+  [int]$AgentErrorEndX = 0,
+  [int]$AgentErrorEndY = 0,
+  [string]$AgentErrorPrefix = "Cannot connect to API",
+  [int]$AgentErrorMaxRetries = 1,
   [switch]$PromptEachEpisode,
   [switch]$TrimWorkingSet,
   [int]$MemoryPressureMb = 0,
@@ -186,6 +193,77 @@ function Wait-AgentAfterPrompt {
   }
 }
 
+function Test-AgentErrorOutput {
+  param(
+    [string]$Episode,
+    [string]$EpisodeDir,
+    [int]$Attempt
+  )
+
+  if (-not $CheckAgentError) {
+    return $false
+  }
+
+  $outFile = Join-Path $EpisodeDir ("agent-error-check-attempt-{0}.json" -f $Attempt)
+  Write-Event -Episode $Episode -Step "agent.error_check.begin" -Data @{
+    attempt = $Attempt
+    region = "$AgentErrorStartX,$AgentErrorStartY->$AgentErrorEndX,$AgentErrorEndY"
+    prefix = $AgentErrorPrefix
+  }
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "read-agent-output-text.ps1") `
+    -ProcessName $ProcessName `
+    -StartX $AgentErrorStartX `
+    -StartY $AgentErrorStartY `
+    -EndX $AgentErrorEndX `
+    -EndY $AgentErrorEndY `
+    -DetectPrefix $AgentErrorPrefix `
+    -OutFile $outFile
+
+  $exitCode = $LASTEXITCODE
+  $isError = ($exitCode -eq 2)
+  Write-Event -Episode $Episode -Step "agent.error_check.end" -Data @{
+    attempt = $Attempt
+    exitCode = $exitCode
+    isError = $isError
+    outFile = $outFile
+  }
+
+  return $isError
+}
+
+function Invoke-AgentPromptWithRetry {
+  param(
+    [string]$Episode,
+    [string]$EpisodeDir,
+    [string]$PromptFile
+  )
+
+  $maxAttempts = if ($CheckAgentError) { [Math]::Max(1, $AgentErrorMaxRetries + 1) } else { 1 }
+
+  for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    Write-Event -Episode $Episode -Step "agent.prompt.begin" -Data @{
+      promptFile = $PromptFile
+      attempt = $attempt
+      maxAttempts = $maxAttempts
+    }
+
+    Invoke-AgentPrompt -PromptFileOverride $PromptFile
+    Write-Event -Episode $Episode -Step "agent.prompt.end" -Data @{ attempt = $attempt }
+    Wait-AgentAfterPrompt -Episode $Episode -EpisodeDir $EpisodeDir
+
+    if (-not (Test-AgentErrorOutput -Episode $Episode -EpisodeDir $EpisodeDir -Attempt $attempt)) {
+      Write-Event -Episode $Episode -Step "agent.prompt.accepted" -Data @{ attempt = $attempt }
+      return $true
+    }
+
+    Write-Event -Episode $Episode -Step "agent.prompt.error_detected" -Data @{ attempt = $attempt }
+  }
+
+  Write-Event -Episode $Episode -Step "agent.prompt.failed_all_attempts" -Data @{ maxAttempts = $maxAttempts }
+  return $false
+}
+
 function Start-LocalStressPage {
   $path = Join-Path (Split-Path -Parent $PSScriptRoot) "web-stress\stress.html"
   if (-not (Test-Path -LiteralPath $path)) {
@@ -311,10 +389,20 @@ try {
 
     if ($PromptEachEpisode) {
       $promptFile = Get-PromptFileForEpisode -Index $episodeIndex
-      Write-Event -Episode $episode -Step "agent.prompt.begin" -Data @{ promptFile = $promptFile }
-      Invoke-AgentPrompt -PromptFileOverride $promptFile
-      Write-Event -Episode $episode -Step "agent.prompt.end"
-      Wait-AgentAfterPrompt -Episode $episode -EpisodeDir $episodeDir
+      $accepted = Invoke-AgentPromptWithRetry -Episode $episode -EpisodeDir $episodeDir -PromptFile $promptFile
+      if (-not $accepted) {
+        Write-Event -Episode $episode -Step "skip.invalid_agent_output"
+        $summaries.Add([pscustomobject]@{
+          episode = $episode
+          hit = $false
+          skipped = $true
+          reason = "agent_error"
+          maxBlackRatio = 0
+          hitAfterRestoreSec = $null
+          directory = $episodeDir
+        })
+        continue
+      }
     }
 
     if ($AgentCooldownSeconds -gt 0) {
