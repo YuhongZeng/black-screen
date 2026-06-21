@@ -12,9 +12,38 @@
 4. 老会话有 bug，输入框失效，需要先点“新会话/打开会话”。
 5. IDE 是管理员权限启动，PowerShell 不是管理员，Windows 不允许低权限进程向高权限窗口发送输入。
 
-## 单次投喂测试
+## 先用最稳的倒计时模式测试
 
-先不要直接跑完整复现。先测试能否自动输入。
+先不要直接跑完整复现。也先不要让脚本最大化和点击坐标。用倒计时模式：
+
+```powershell
+cd G:\crash
+.\scripts\send-agent-prompt.ps1 `
+  -PromptFile .\agent-prompts\01-generate-feature.txt `
+  -UseCurrentForeground `
+  -CountdownSeconds 5 `
+  -SubmitKeys "{ENTER}"
+```
+
+执行后 5 秒内，手工切到 IDE，点到 Agent 输入框。倒计时结束后脚本只负责粘贴和回车。
+
+如果这个模式都不能输入，说明不是坐标问题，优先检查：
+
+1. PowerShell 是否和 IDE 权限一致。如果 IDE 是管理员，PowerShell 也要管理员。
+2. 输入框是否真的可输入，旧会话是否已经失效。
+3. Electron/控件是否拦截了系统粘贴。
+
+## 坐标模式前先量坐标
+
+使用下面脚本读取鼠标相对 IDE 主窗口左上角的位置：
+
+```powershell
+.\scripts\get-relative-mouse.ps1 -ProcessName codeArts-agent -Samples 10 -IntervalMs 1000
+```
+
+把鼠标放到“新会话/打开会话”按钮、输入框位置，记录 `relative=(x,y)`。
+
+## 坐标投喂测试
 
 如果需要先点会话按钮，再点输入框：
 
@@ -23,7 +52,6 @@ cd G:\crash
 .\scripts\send-agent-prompt.ps1 `
   -ProcessName codeArts-agent `
   -PromptFile .\agent-prompts\01-generate-feature.txt `
-  -MaximizeBeforeInput `
   -ClickSequence "120,160;1450,980" `
   -SubmitKeys "{ENTER}"
 ```
@@ -40,7 +68,6 @@ cd G:\crash
 .\scripts\send-agent-prompt.ps1 `
   -ProcessName codeArts-agent `
   -PromptFile .\agent-prompts\01-generate-feature.txt `
-  -MaximizeBeforeInput `
   -ClickX 1450 `
   -ClickY 980 `
   -SubmitKeys "{ENTER}"
@@ -54,7 +81,7 @@ cd G:\crash
 
 ## 跑稳定复现时使用
 
-会话容易失效时，建议每轮都先点击新会话/打开会话，再点击输入框：
+会话容易失效时，建议每轮都先点击新会话/打开会话，再点击输入框。不要先加 `-MaximizeBeforeAgentInput`，除非你确认最大化不会改变 UI 布局：
 
 ```powershell
 .\scripts\repro-stable-runner.ps1 `
@@ -64,7 +91,6 @@ cd G:\crash
   -Episodes 10 `
   -AgentPromptDir .\agent-prompts `
   -AgentClickSequence "120,160;1450,980" `
-  -MaximizeBeforeAgentInput `
   -PromptEachEpisode `
   -AgentRunSeconds 90 `
   -AgentCooldownSeconds 180 `

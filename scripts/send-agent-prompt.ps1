@@ -9,7 +9,9 @@ param(
   [string]$SubmitKeys = "{ENTER}",
   [int]$DelayMs = 300,
   [int]$PasteRetries = 1,
-  [switch]$MaximizeBeforeInput
+  [switch]$MaximizeBeforeInput,
+  [switch]$UseCurrentForeground,
+  [int]$CountdownSeconds = 0
 )
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -109,23 +111,35 @@ if (-not $Prompt) {
 
 $target = Get-TargetWindow
 
-if ($MaximizeBeforeInput) {
+if ($CountdownSeconds -gt 0) {
+  Write-Host "Countdown mode: focus the Agent input box now. Pasting in $CountdownSeconds seconds..."
+  for ($i = $CountdownSeconds; $i -gt 0; $i--) {
+    Write-Host "$i..."
+    Start-Sleep -Seconds 1
+  }
+}
+
+if ($MaximizeBeforeInput -and -not $UseCurrentForeground) {
   [void][AgentPromptWin32]::ShowWindow($target.MainWindowHandle, $SW_MAXIMIZE)
   Start-Sleep -Milliseconds $DelayMs
 }
 
-[void][AgentPromptWin32]::SetForegroundWindow($target.MainWindowHandle)
-Start-Sleep -Milliseconds $DelayMs
+if (-not $UseCurrentForeground) {
+  [void][AgentPromptWin32]::SetForegroundWindow($target.MainWindowHandle)
+  Start-Sleep -Milliseconds $DelayMs
+}
 
-if ($FocusKeys) {
+if ($FocusKeys -and -not $UseCurrentForeground) {
   [System.Windows.Forms.SendKeys]::SendWait($FocusKeys)
   Start-Sleep -Milliseconds $DelayMs
 }
 
-Invoke-ClickSequence -Hwnd $target.MainWindowHandle -Sequence $ClickSequence
+if (-not $UseCurrentForeground) {
+  Invoke-ClickSequence -Hwnd $target.MainWindowHandle -Sequence $ClickSequence
 
-if ($ClickX -ge 0 -and $ClickY -ge 0) {
-  Invoke-RelativeClick -Hwnd $target.MainWindowHandle -X $ClickX -Y $ClickY
+  if ($ClickX -ge 0 -and $ClickY -ge 0) {
+    Invoke-RelativeClick -Hwnd $target.MainWindowHandle -X $ClickX -Y $ClickY
+  }
 }
 
 [System.Windows.Forms.Clipboard]::SetText($Prompt)
