@@ -75,9 +75,28 @@ public static class StableRunnerWin32 {
 $SW_MINIMIZE = 6
 $SW_RESTORE = 9
 $SW_MAXIMIZE = 3
-$ES_CONTINUOUS = 0x80000000
-$ES_SYSTEM_REQUIRED = 0x00000001
-$ES_DISPLAY_REQUIRED = 0x00000002
+[uint32]$ES_CONTINUOUS = [Convert]::ToUInt32("80000000", 16)
+[uint32]$ES_SYSTEM_REQUIRED = [Convert]::ToUInt32("00000001", 16)
+[uint32]$ES_DISPLAY_REQUIRED = [Convert]::ToUInt32("00000002", 16)
+
+function Join-UInt32Flags {
+  param([uint32[]]$Flags)
+
+  [uint32]$value = 0
+  foreach ($flag in $Flags) {
+    $value = [uint32]($value -bor $flag)
+  }
+  return $value
+}
+
+function Enable-KeepDisplayOn {
+  $flags = Join-UInt32Flags @($ES_CONTINUOUS, $ES_SYSTEM_REQUIRED, $ES_DISPLAY_REQUIRED)
+  [void][StableRunnerWin32]::SetThreadExecutionState($flags)
+}
+
+function Reset-KeepDisplayOn {
+  [void][StableRunnerWin32]::SetThreadExecutionState($ES_CONTINUOUS)
+}
 
 function Get-TargetWindow {
   $processes = Get-Process -Name $ProcessName -ErrorAction SilentlyContinue |
@@ -342,14 +361,52 @@ function Invoke-BlackCheck {
   )
 
   $shot = Join-Path $EpisodeDir ("window-shot-{0:0000}.png" -f $Index)
-  $json = powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "test-window-black.ps1") `
+  $rawOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "test-window-black.ps1") `
     -ProcessName $ProcessName `
     -OutPath $shot `
-    -Threshold $BlackThreshold
+    -Threshold $BlackThreshold 2>&1
+
+  $exitCode = $LASTEXITCODE
+  $rawPath = Join-Path $EpisodeDir ("black-check-{0:0000}.raw.txt" -f $Index)
+  $rawLines = @($rawOutput | ForEach-Object { $_.ToString() })
+  $rawLines | Out-File -LiteralPath $rawPath -Encoding utf8
 
   $checkPath = Join-Path $EpisodeDir ("black-check-{0:0000}.json" -f $Index)
-  $json | Out-File -LiteralPath $checkPath -Encoding utf8
-  return ($json | ConvertFrom-Json)
+  $jsonLine = $rawLines | Where-Object { $_ -match '^\s*\{' } | Select-Object -Last 1
+
+  if ($jsonLine) {
+    try {
+      $result = $jsonLine | ConvertFrom-Json
+      Add-Member -InputObject $result -NotePropertyName exitCode -NotePropertyValue $exitCode -Force
+      Add-Member -InputObject $result -NotePropertyName rawPath -NotePropertyValue $rawPath -Force
+      $result | ConvertTo-Json -Compress |
+        Out-File -LiteralPath $checkPath -Encoding utf8
+      return $result
+    } catch {
+      $parseError = $_.Exception.Message
+    }
+  } else {
+    $parseError = "No JSON object line was found in test-window-black output."
+  }
+
+  $fallback = [pscustomobject]@{
+    processName = $ProcessName
+    pid = $null
+    width = 0
+    height = 0
+    blackRatio = 0
+    threshold = $BlackThreshold
+    isBlack = $false
+    screenshot = $shot
+    time = (Get-Date).ToString("o")
+    exitCode = $exitCode
+    rawPath = $rawPath
+    parseError = $parseError
+  }
+
+  $fallback | ConvertTo-Json -Compress |
+    Out-File -LiteralPath $checkPath -Encoding utf8
+  return $fallback
 }
 
 function Save-ProcessSnapshot {
@@ -372,7 +429,7 @@ $script:EventLog = Join-Path $runDir "events.ndjson"
 New-Item -ItemType File -Path $script:EventLog -Force | Out-Null
 
 if (-not $NoKeepDisplayOn) {
-  [void][StableRunnerWin32]::SetThreadExecutionState($ES_CONTINUOUS -bor $ES_SYSTEM_REQUIRED -bor $ES_DISPLAY_REQUIRED)
+  Enable-KeepDisplayOn
   Write-Event -Episode "run" -Step "keep_display_on.enabled"
 } else {
   Write-Event -Episode "run" -Step "keep_display_on.disabled"
@@ -570,6 +627,6 @@ try {
   Write-Host "Run directory: $runDir"
 } finally {
   if (-not $NoKeepDisplayOn) {
-    [void][StableRunnerWin32]::SetThreadExecutionState($ES_CONTINUOUS)
+    Reset-KeepDisplayOn
   }
 }
