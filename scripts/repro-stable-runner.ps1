@@ -21,6 +21,16 @@ param(
   [switch]$MaximizeBeforeAgentInput,
   [int]$AgentRunSeconds = 90,
   [int]$AgentCooldownSeconds = 120,
+  [ValidateSet("fixed", "visualStable")]
+  [string]$AgentWaitMode = "fixed",
+  [int]$AgentOutputX = 0,
+  [int]$AgentOutputY = 0,
+  [int]$AgentOutputWidth = 900,
+  [int]$AgentOutputHeight = 700,
+  [int]$AgentVisualMaxSeconds = 180,
+  [int]$AgentVisualQuietSeconds = 20,
+  [int]$AgentVisualIntervalSeconds = 2,
+  [double]$AgentVisualChangeThreshold = 0.002,
   [switch]$PromptEachEpisode,
   [switch]$TrimWorkingSet,
   [int]$MemoryPressureMb = 0,
@@ -139,6 +149,41 @@ function Invoke-AgentPrompt {
   }
 
   powershell @args
+}
+
+function Wait-AgentAfterPrompt {
+  param(
+    [string]$Episode,
+    [string]$EpisodeDir
+  )
+
+  if ($AgentWaitMode -eq "visualStable") {
+    $logPath = Join-Path $EpisodeDir "agent-visual-stable.ndjson"
+    Write-Event -Episode $Episode -Step "agent.visual_wait.begin" -Data @{
+      maxSeconds = $AgentVisualMaxSeconds
+      quietSeconds = $AgentVisualQuietSeconds
+      region = "$AgentOutputX,$AgentOutputY,$AgentOutputWidth,$AgentOutputHeight"
+    }
+    powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "wait-agent-visual-stable.ps1") `
+      -ProcessName $ProcessName `
+      -RegionX $AgentOutputX `
+      -RegionY $AgentOutputY `
+      -RegionWidth $AgentOutputWidth `
+      -RegionHeight $AgentOutputHeight `
+      -MaxSeconds $AgentVisualMaxSeconds `
+      -QuietSeconds $AgentVisualQuietSeconds `
+      -IntervalSeconds $AgentVisualIntervalSeconds `
+      -ChangeThreshold $AgentVisualChangeThreshold `
+      -LogPath $logPath
+    Write-Event -Episode $Episode -Step "agent.visual_wait.end" -Data @{ exitCode = $LASTEXITCODE }
+    return
+  }
+
+  if ($AgentRunSeconds -gt 0) {
+    Write-Event -Episode $Episode -Step "agent.active_wait.begin" -Data @{ seconds = $AgentRunSeconds }
+    Start-Sleep -Seconds $AgentRunSeconds
+    Write-Event -Episode $Episode -Step "agent.active_wait.end"
+  }
 }
 
 function Start-LocalStressPage {
@@ -269,12 +314,7 @@ try {
       Write-Event -Episode $episode -Step "agent.prompt.begin" -Data @{ promptFile = $promptFile }
       Invoke-AgentPrompt -PromptFileOverride $promptFile
       Write-Event -Episode $episode -Step "agent.prompt.end"
-
-      if ($AgentRunSeconds -gt 0) {
-        Write-Event -Episode $episode -Step "agent.active_wait.begin" -Data @{ seconds = $AgentRunSeconds }
-        Start-Sleep -Seconds $AgentRunSeconds
-        Write-Event -Episode $episode -Step "agent.active_wait.end"
-      }
+      Wait-AgentAfterPrompt -Episode $episode -EpisodeDir $episodeDir
     }
 
     if ($AgentCooldownSeconds -gt 0) {

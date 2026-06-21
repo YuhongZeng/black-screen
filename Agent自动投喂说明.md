@@ -11,6 +11,17 @@
 3. 点击点没有真正聚焦输入框。
 4. 老会话有 bug，输入框失效，需要先点“新会话/打开会话”。
 5. IDE 是管理员权限启动，PowerShell 不是管理员，Windows 不允许低权限进程向高权限窗口发送输入。
+6. 新建会话后输入框位置变化，固定坐标已经不再指向输入框。
+
+## 乱码问题
+
+提示词文件按 UTF-8 读取。之前乱码通常是 PowerShell 5.1 用系统 ANSI 读取 UTF-8 文件导致。现在 `send-agent-prompt.ps1` 已改为：
+
+```powershell
+[System.IO.File]::ReadAllText($file, [System.Text.Encoding]::UTF8)
+```
+
+如果仍有乱码，先用纯 ASCII 提示词测试，确认不是输入控件本身的问题。
 
 ## 先用最稳的倒计时模式测试
 
@@ -78,6 +89,52 @@ cd G:\crash
 ```powershell
 -PasteRetries 2
 ```
+
+## 判断当前焦点是否真的可输入
+
+可以用输入校验模式。它会在当前焦点里写入一个 ASCII 探针，复制回来比较。
+
+注意：如果焦点点错，它会把探针写到错误位置，所以只用于单独校准，不要一开始放进长时间复现 runner。
+
+倒计时手工聚焦输入框后校验：
+
+```powershell
+.\scripts\send-agent-prompt.ps1 `
+  -PromptFile .\agent-prompts\01-generate-feature.txt `
+  -UseCurrentForeground `
+  -CountdownSeconds 5 `
+  -VerifyInputFocus `
+  -SubmitKeys ""
+```
+
+坐标点击后校验：
+
+```powershell
+.\scripts\send-agent-prompt.ps1 `
+  -ProcessName codeArts-agent `
+  -PromptFile .\agent-prompts\01-generate-feature.txt `
+  -ClickSequence "120,160;1450,980" `
+  -VerifyInputFocus `
+  -SubmitKeys ""
+```
+
+如果校验失败，说明当前焦点不是可输入框，或者输入框已失效。此时不要跑完整 runner，先调整：
+
+1. 点击序列里先点新会话/打开会话。
+2. 重新用 `get-relative-mouse.ps1` 量输入框坐标。
+3. 确认输入框有光标。
+4. 确认 PowerShell 和 IDE 权限一致。
+
+## 新会话导致输入框位置变化怎么办
+
+不要把“新会话按钮”和“输入框”想成永远固定的两个点。新会话后 UI 可能重新布局。
+
+更稳的做法：
+
+1. 用 `ClickSequence` 点“新会话/打开会话”。
+2. 等 UI 稳定后，再点输入框位置。
+3. 如果输入框位置变化明显，先不用完整 runner，单独调 `send-agent-prompt.ps1`。
+4. 如果 UI 每次变化都很大，自动投喂只能作为半自动：用 `-UseCurrentForeground -CountdownSeconds 5`，人工点输入框，脚本粘贴提交。
 
 ## 跑稳定复现时使用
 

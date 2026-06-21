@@ -11,7 +11,10 @@ param(
   [int]$PasteRetries = 1,
   [switch]$MaximizeBeforeInput,
   [switch]$UseCurrentForeground,
-  [int]$CountdownSeconds = 0
+  [int]$CountdownSeconds = 0,
+  [switch]$VerifyInputFocus,
+  [string]$ProbeText = "__AGENT_INPUT_PROBE__",
+  [int]$ProbeDelayMs = 200
 )
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -102,7 +105,8 @@ function Invoke-ClickSequence {
 }
 
 if ($PromptFile) {
-  $Prompt = Get-Content -LiteralPath $PromptFile -Raw
+  $resolvedPromptFile = (Resolve-Path -LiteralPath $PromptFile).Path
+  $Prompt = [System.IO.File]::ReadAllText($resolvedPromptFile, [System.Text.Encoding]::UTF8)
 }
 
 if (-not $Prompt) {
@@ -140,6 +144,26 @@ if (-not $UseCurrentForeground) {
   if ($ClickX -ge 0 -and $ClickY -ge 0) {
     Invoke-RelativeClick -Hwnd $target.MainWindowHandle -X $ClickX -Y $ClickY
   }
+}
+
+if ($VerifyInputFocus) {
+  [System.Windows.Forms.Clipboard]::SetText($ProbeText)
+  Start-Sleep -Milliseconds $ProbeDelayMs
+  [System.Windows.Forms.SendKeys]::SendWait("^a")
+  Start-Sleep -Milliseconds $ProbeDelayMs
+  [System.Windows.Forms.SendKeys]::SendWait("^v")
+  Start-Sleep -Milliseconds $ProbeDelayMs
+  [System.Windows.Forms.SendKeys]::SendWait("^a")
+  Start-Sleep -Milliseconds $ProbeDelayMs
+  [System.Windows.Forms.SendKeys]::SendWait("^c")
+  Start-Sleep -Milliseconds $ProbeDelayMs
+
+  $copied = [System.Windows.Forms.Clipboard]::GetText()
+  if ($copied -ne $ProbeText) {
+    throw "Input verification failed. Current focus did not accept/copy the probe text. Copied='$copied'."
+  }
+
+  Write-Host "Input verification passed."
 }
 
 [System.Windows.Forms.Clipboard]::SetText($Prompt)
